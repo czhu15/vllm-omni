@@ -3,7 +3,7 @@
 
 from vllm_gaudi.v1.worker.hpu_worker import HPUWorker
 
-from vllm_omni.worker.npu.hpu_ar_model_runner import HPUARModelRunner
+from vllm_omni.worker.hpu.hpu_ar_model_runner import HPUARModelRunner
 
 
 class HPUARWorker(HPUWorker):

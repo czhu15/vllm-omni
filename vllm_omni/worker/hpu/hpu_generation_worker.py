@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from vllm_ascend.worker.worker_v1 import HPUWorker
+from vllm_gaudi.v1.worker.hpu_worker import HPUWorker
 
 from vllm_omni.worker.hpu.hpu_generation_model_runner import HPUGenerationModelRunner
 
