@@ -6,8 +6,7 @@ import time
 
 import torch
 import zmq
-from transformers import PretrainedConfig
-from vllm.config import LoadConfig, ModelConfig, VllmConfig, set_current_vllm_config
+from vllm.config import LoadConfig, VllmConfig, set_current_vllm_config
 from vllm.distributed.device_communicators.shm_broadcast import MessageQueue
 from vllm.distributed.parallel_state import (
     init_distributed_environment,
@@ -60,19 +59,16 @@ class HPUWorker:
         torch.hpu.set_device(device)
 
         # hack
-        # set hf_config to a fake one to avolid get attr error
-        class _FakePretrainedConfig(PretrainedConfig):
-            def __getattr__(self, name):
-                return "fake"
-
-        vllm_config = VllmConfig(model_config=ModelConfig(hf_config=_FakePretrainedConfig()), load_config=LoadConfig())
+        vllm_config = VllmConfig()
         vllm_config.parallel_config.tensor_parallel_size = self.od_config.num_gpus
         set_current_vllm_config(vllm_config)
 
         init_distributed_environment(world_size=world_size, rank=rank)
         initialize_model_parallel(tensor_model_parallel_size=world_size)
+        logger.info(f"Worker {self.rank}: Initialized device and distributed environment.")
 
-        model_loader = DiffusersPipelineLoader(vllm_config.load_config)
+        load_config = LoadConfig()
+        model_loader = DiffusersPipelineLoader(load_config)
         time_before_load = time.perf_counter()
         with DeviceMemoryProfiler() as m:
             self.pipeline = model_loader.load_model(
@@ -108,7 +104,7 @@ class HPUWorker:
                 logger.warning("Worker %s: Failed to destroy process group: %s", self.rank, exc)
 
 
-class HPUWorkerProc:
+class WorkerProc:
     """Wrapper that runs one Worker in a separate process."""
 
     def __init__(
@@ -221,7 +217,7 @@ class HPUWorkerProc:
     ) -> None:
         """Worker initialization and execution loops."""
 
-        worker_proc = HPUWorkerProc(
+        worker_proc = WorkerProc(
             od_config,
             gpu_id=rank,
             broadcast_handle=broadcast_handle,
