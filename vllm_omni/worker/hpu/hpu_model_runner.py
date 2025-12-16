@@ -10,6 +10,7 @@ from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
 from vllm.model_executor.models.interfaces import supports_mrope
 from vllm.model_executor.models.interfaces_base import VllmModelForPooling
 from vllm.sampling_params import SamplingType
+from vllm.sequence import IntermediateTensors
 from vllm.utils import LazyLoader, cdiv
 from vllm.v1.attention.backends.utils import (
     CommonAttentionMetadata,
@@ -17,8 +18,8 @@ from vllm.v1.attention.backends.utils import (
 )
 from vllm.v1.spec_decode.eagle import EagleProposer
 from vllm_gaudi.v1.worker.hpu_input_batch import CachedRequestState
-from vllm_gaudi.v1.worker.hpu_model_runner import HPUModelRunner, IntermediateTensors, PerLayerAttnMetadata
-from vllm.v1.worker.gpu_model_runner import IntermediateTensors, PerLayerAttnMetadata
+from vllm_gaudi.v1.worker.hpu_model_runner import HPUModelRunner
+from vllm.v1.worker.gpu_model_runner import PerLayerAttnMetadata
 from vllm.v1.worker.ubatch_splitting import ubatch_split
 from vllm.v1.worker.ubatch_utils import UBatchSlices
 

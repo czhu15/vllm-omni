@@ -9,23 +9,22 @@ from __future__ import annotations
 import torch
 from vllm.forward_context import BatchDescriptor
 from vllm.logger import init_logger
+from vllm.sequence import IntermediateTensors
 from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.outputs import AsyncModelRunnerOutput
 from vllm.v1.structured_output.utils import apply_grammar_bitmask
 from vllm.v1.utils import record_function_or_nullcontext
-from vllm.v1.worker.hpu_model_runner import (
+from vllm.distributed.parallel_state import get_pp_group, get_tp_group
+from vllm_gaudi.v1.worker.hpu_model_runner import (
     EMPTY_MODEL_RUNNER_OUTPUT,
     AsyncHPUModelRunnerOutput,
-    IntermediateTensors,
-    get_pp_group,
-    get_tp_group,
     has_kv_transfer_group,
     set_forward_context,
 )
 from vllm.v1.worker.utils import is_residual_scattered_for_sp
 
 from vllm_omni.outputs import OmniModelRunnerOutput
-from vllm_omni.worker.hpu_model_runner import OmniHPUModelRunner
+from vllm_omni.worker.hpu.hpu_model_runner import OmniHPUModelRunner
 
 logger = init_logger(__name__)
 

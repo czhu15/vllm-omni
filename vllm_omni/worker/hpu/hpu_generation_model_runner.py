@@ -15,15 +15,15 @@ import torch
 from vllm.config import CUDAGraphMode
 from vllm.forward_context import BatchDescriptor
 from vllm.multimodal.inputs import MultiModalKwargs
+from vllm.sequence import IntermediateTensors
 from vllm.v1.attention.backends.utils import CommonAttentionMetadata
 from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.spec_decode.eagle import EagleProposer
 from vllm.v1.utils import record_function_or_nullcontext
-from vllm.v1.worker.hpu_model_runner import (
+from vllm.v1.worker.gpu_model_runner import PerLayerAttnMetadata
+from vllm_gaudi.v1.worker.hpu_model_runner import (
     EMPTY_MODEL_RUNNER_OUTPUT,
     AsyncHPUModelRunnerOutput,
-    IntermediateTensors,
-    PerLayerAttnMetadata,
     get_pp_group,
     set_forward_context,
 )
@@ -31,7 +31,7 @@ from vllm.v1.worker.ubatch_utils import UBatchSlices
 from vllm.v1.worker.utils import sanity_check_mm_encoder_outputs
 
 from vllm_omni.outputs import OmniModelRunnerOutput
-from vllm_omni.worker.hpu_model_runner import OmniHPUModelRunner
+from vllm_omni.worker.hpu.hpu_model_runner import OmniHPUModelRunner
 
 logger = logging.getLogger(__name__)
 

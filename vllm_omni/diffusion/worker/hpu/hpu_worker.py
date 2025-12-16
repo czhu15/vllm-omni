@@ -55,8 +55,9 @@ class HPUWorker:
         os.environ["RANK"] = str(rank)
         os.environ["WORLD_SIZE"] = str(world_size)
 
-        device = torch.device(f"hpu:{rank}")
-        torch.hpu.set_device(device)
+        logger.info(f"set_device {self.local_rank=}")
+        device = torch.device("hpu")
+        torch.hpu.set_device(self.local_rank)
 
         # hack
         vllm_config = VllmConfig()

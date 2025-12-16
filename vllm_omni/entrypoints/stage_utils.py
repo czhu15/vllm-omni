@@ -71,7 +71,7 @@ def set_stage_devices(
             logger.debug("[Stage-%s] torch.hpu not available, skipping HPU device setup", stage_id)
             return
 
-        is_available_fn = torch.hpu.is_available
+        is_available_fn = None      # TODO(czhu15): Implement HPU availability check
         set_device_fn = torch.hpu.set_device
         device_count_fn = torch.hpu.device_count
         get_device_properties_fn = torch.hpu.get_device_properties

@@ -6,10 +6,14 @@ from vllm.model_executor import set_random_seed
 from vllm.platforms import current_platform
 from vllm.utils import GiB_bytes, MemorySnapshot
 from vllm.v1.utils import report_usage_stats
-from vllm.v1.worker.hpu_worker import Worker as HPUWorker
-from vllm.v1.worker.hpu_worker import init_worker_distributed_environment
+from vllm_gaudi.v1.worker.hpu_worker import HPUWorker
+from vllm_gaudi.v1.worker.hpu_worker import init_worker_distributed_environment
 
-from vllm_omni.worker.hpu_ar_model_runner import HPUARModelRunner
+from vllm_omni.worker.hpu.hpu_ar_model_runner import HPUARModelRunner
+
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 class HPUARWorker(HPUWorker):
@@ -36,8 +40,6 @@ class HPUARWorker(HPUWorker):
             self.device = torch.device(f"cuda:{self.local_rank}")
             current_platform.set_device(self.device)
 
-            current_platform.check_if_supports_dtype(self.model_config.dtype)
-
             # Initialize the distributed environment BEFORE taking
             # memory snapshot
             # This ensures NCCL buffers are allocated before we measure
@@ -47,7 +49,6 @@ class HPUARWorker(HPUWorker):
                 self.rank,
                 self.distributed_init_method,
                 self.local_rank,
-                current_platform.dist_backend,
             )
 
             # Set random seed.
@@ -74,6 +75,47 @@ class HPUARWorker(HPUWorker):
                     f"{GiB(self.requested_memory)} GiB). Decrease GPU memory "
                     f"utilization or reduce GPU memory used by other processes."
                 )
+        elif self.device_config.device.type == "hpu":
+            # TODO(czhu15) move this duplicated code to HPUWorker
+            logger.info(f"set_device, {self.local_rank=}")
+            self.device = torch.device("hpu")
+            current_platform.set_device(self.local_rank)
+
+            # Initialize the distributed environment BEFORE taking
+            # memory snapshot
+            # This ensures NCCL buffers are allocated before we measure
+            # available memory
+            init_worker_distributed_environment(
+                self.vllm_config,
+                self.rank,
+                self.distributed_init_method,
+                self.local_rank,
+            )
+
+            # Set random seed.
+            set_random_seed(self.model_config.seed)
+
+            # Now take memory snapshot after HCCL is initialized
+            gc.collect()
+
+            # take current memory snapshot
+            # TODO(czhu15) implement hpu version of memory snapshot
+            # self.init_snapshot = MemorySnapshot()
+            # self.requested_memory = self.init_snapshot.total_memory * self.cache_config.gpu_memory_utilization
+            # if self.init_snapshot.free_memory < self.requested_memory:
+
+            #     def GiB(b):
+            #         return round(b / GiB_bytes, 2)
+
+            #     raise ValueError(
+            #         f"Free memory on device "
+            #         f"({GiB(self.init_snapshot.free_memory)}/"
+            #         f"{GiB(self.init_snapshot.total_memory)} GiB) on startup "
+            #         f"is less than desired GPU memory utilization "
+            #         f"({self.cache_config.gpu_memory_utilization}, "
+            #         f"{GiB(self.requested_memory)} GiB). Decrease GPU memory "
+            #         f"utilization or reduce GPU memory used by other processes."
+            #     )
         else:
             raise RuntimeError(f"Not support device type: {self.device_config.device}")
 
