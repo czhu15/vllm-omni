@@ -336,7 +336,6 @@ def main(args):
         max_tokens=2048,
         seed=SEED,  # Fixed seed for sampling
         detokenize=True,
-        repetition_penalty=1.1,
     )
     talker_sampling_params = SamplingParams(
         temperature=0.9,
@@ -345,7 +344,6 @@ def main(args):
         max_tokens=2048,
         seed=SEED,  # Fixed seed for sampling
         detokenize=True,
-        repetition_penalty=1.05,
         stop_token_ids=[8294],
     )
     code2wav_sampling_params = SamplingParams(
@@ -355,13 +353,12 @@ def main(args):
         max_tokens=2048,
         seed=SEED,  # Fixed seed for sampling
         detokenize=True,
-        repetition_penalty=1.1,
     )
 
     sampling_params_list = [
         thinker_sampling_params,
-        talker_sampling_params,
-        code2wav_sampling_params,
+        # talker_sampling_params,
+        # code2wav_sampling_params,
     ]
 
     if args.txt_prompts is None:

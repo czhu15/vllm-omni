@@ -25,7 +25,6 @@ stage_args:
       max_tokens: 2048
       seed: 42
       detokenize: True
-      repetition_penalty: 1.1
 
 # Top-level runtime config (concise): default windows and stage edges
 runtime:
