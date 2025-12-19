@@ -7,7 +7,9 @@ and also outputs sampled tokens.
 from __future__ import annotations
 
 import habana_frameworks.torch as htorch
+import numpy as np
 import torch
+from typing import Optional
 from vllm.forward_context import BatchDescriptor
 from vllm.logger import init_logger
 from vllm.multimodal.inputs import (BatchedTensorInputs, MultiModalKwargs, MultiModalKwargsItem)
@@ -96,7 +98,7 @@ class HPUARModelRunner(OmniHPUModelRunner):
                                                lora_mask=lora_mask,
                                                **additional_kwargs)
         # Omni specific
-        # TODO(czhu15): handle the multimodal_outputs
+        # TODO(czhu15): need check the accuracy of multimodal_outputs on HPU
         multimodal_outputs = model_output.multimodal_outputs
         hidden_states = model_output.text_hidden_states
 
@@ -118,7 +120,7 @@ class HPUARModelRunner(OmniHPUModelRunner):
                                                      f'{num_blocks}')):
             logits = self.model.compute_logits(hidden_states)
         return non_flattened_hidden_states, aux_hidden_states, \
-            hidden_states, logits
+            hidden_states, logits, multimodal_outputs
 
     @torch.inference_mode()
     def execute_model(
@@ -224,6 +226,7 @@ class HPUARModelRunner(OmniHPUModelRunner):
                                                                          warmup_mode)
         prefill_data, \
             dummy_prefill_input_data_batches_across_dp = prefill_input_data
+        logits_indices = prefill_data.logits_indices
         num_pad_prefill_batch_across_dp = \
             0 if dummy_prefill_input_data_batches_across_dp is None \
             else len(dummy_prefill_input_data_batches_across_dp.request_ids)
@@ -311,7 +314,7 @@ class HPUARModelRunner(OmniHPUModelRunner):
                         invalid_req_indices.append(prefill_start_idx + idx)
                 htorch.core.mark_step()
                 non_flattened_hidden_states, aux_hidden_states, \
-                    sample_hidden_states, logits_device = \
+                    sample_hidden_states, logits_device, multimodal_outputs = \
                     self._execute_model_generic_omni(
                         token_ids, position_ids, attn_metadata, logits_indices,
                         self.kv_caches,
@@ -363,7 +366,7 @@ class HPUARModelRunner(OmniHPUModelRunner):
             for idx, (req_id, prompt_len, token_ids, position_ids, attn_metadata, logits_indices,
                       logits_requests) in enumerate(zip(*shallow_tuple(dummy_prefill_input_data_batches_across_dp))):
                 htorch.core.mark_step()
-                _, _, _, dummy_logits_device = \
+                _, _, _, dummy_logits_device, multimodal_outputs = \
                 self._execute_model_generic_omni(
                     token_ids,
                     position_ids,
@@ -385,7 +388,7 @@ class HPUARModelRunner(OmniHPUModelRunner):
             self.profiler.start("internal", "decode")
             htorch.core.mark_step()
             non_flattened_hidden_states, aux_hidden_states, \
-                sample_hidden_states, logits_device = \
+                sample_hidden_states, logits_device, multimodal_outputs = \
                     self._execute_model_generic_omni(
                 decode_data.token_ids,
                 decode_data.position_ids,
@@ -456,7 +459,7 @@ class HPUARModelRunner(OmniHPUModelRunner):
 
         elif dummy_decode_input_data_across_dp is not None:
             htorch.core.mark_step()
-            _, _, _, dummy_logits_device = self._execute_model_generic_omni(dummy_decode_input_data_across_dp.token_ids,
+            _, _, _, dummy_logits_device, multimodal_outputs = self._execute_model_generic_omni(dummy_decode_input_data_across_dp.token_ids,
                                                                        dummy_decode_input_data_across_dp.position_ids,
                                                                        dummy_decode_input_data_across_dp.attn_metadata,
                                                                        dummy_decode_input_data_across_dp.logits_indices,
@@ -598,6 +601,52 @@ class HPUARModelRunner(OmniHPUModelRunner):
         all_req_ids = pd_info.decode_req_ids + pd_info.prompt_req_ids
         logprobs = None
 
+        # Convert to per-request tensors on CPU
+        hidden_states_cpu = non_flattened_hidden_states.detach().to("cpu").contiguous()
+        # pooler_output: list[torch.Tensor | None] = []
+        pooler_output: list[torch.Tensor | None] = []
+        prev_logits_index = 0
+        for rid, logits_index in zip(req_ids_output_copy, logits_indices):
+            # Base payload: hidden slice for this request in this iteration
+            hidden_slice = hidden_states_cpu[prev_logits_index : logits_index + 1]
+            payload: dict[str, object] = {"hidden": hidden_slice}
+            # Merge multimodal_outputs if present
+            if isinstance(multimodal_outputs, dict) and multimodal_outputs:
+                mm_payload: dict[str, object] = {}
+                for k, v in multimodal_outputs.items():
+                    try:
+                        # Case 1: tensor aligned on token dimension
+                        if isinstance(v, torch.Tensor) and v.shape[0] == hidden_states_cpu.shape[0]:
+                            mm_payload[k] = v.detach().to("cpu")[prev_logits_index : logits_index + 1].contiguous()
+                        elif isinstance(v, torch.Tensor) and v.shape[0] != hidden_states_cpu.shape[0]:
+                            logger.error(
+                                f"Error in merge multimodal outputs: Tensor dimension mismatch, \
+                                          {v.shape} != {hidden_states_cpu.shape} for {k}"
+                            )
+                        # Case 2: nested dict of tensors aligned on token dimension (e.g., selected_hidden_layers)
+                        elif isinstance(v, dict):
+                            sub_dict: dict[str, torch.Tensor] = {}
+                            for sk, sv in v.items():
+                                if isinstance(sv, torch.Tensor) and sv.shape[0] == hidden_states_cpu.shape[0]:
+                                    sub_dict[str(sk)] = (
+                                        sv.detach().to("cpu")[prev_logits_index : logits_index + 1].contiguous()
+                                    )
+                            if sub_dict:
+                                mm_payload[k] = sub_dict
+                        elif isinstance(v, list):
+                            element = v[0]
+                            if isinstance(element, torch.Tensor):
+                                element = element.detach().to("cpu").contiguous()
+                            multimodal_outputs[k] = v[1:] if len(v) > 1 else v
+                            mm_payload[k] = element
+                    except Exception as e:
+                        # Best-effort; skip malformed entries
+                        logger.error(f"Error in merge multimodal outputs: {e}")
+                if mm_payload:
+                    payload.update(mm_payload)
+            pooler_output.append(payload)  # type: ignore[arg-type]
+            prev_logits_index = logits_index + 1
+
         if self.use_async_scheduling:
             model_runner_output = ModelRunnerOutput(
                 req_ids=req_ids_output_copy,  # CHECK
@@ -605,7 +654,7 @@ class HPUARModelRunner(OmniHPUModelRunner):
                 sampled_token_ids=postprocessed_sampled_token_ids,
                 logprobs=logprobs,
                 prompt_logprobs_dict=prompt_logprobs_dict,  # type: ignore[arg-type]
-                pooler_output=[],
+                pooler_output=(pooler_output if self.vllm_config.model_config.engine_output_type != "text" else None),
             )
             return AsyncHPUModelRunnerOutput(
                 model_runner_output=model_runner_output,
@@ -620,7 +669,7 @@ class HPUARModelRunner(OmniHPUModelRunner):
             sampled_token_ids=postprocessed_sampled_token_ids,
             logprobs=logprobs,
             prompt_logprobs_dict=prompt_logprobs_dict,  # type: ignore[arg-type]
-            pooler_output=[],
+            pooler_output=(pooler_output if self.vllm_config.model_config.engine_output_type != "text" else None),
             kv_connector_output=KVConnectorOutput(
                 finished_sending=finished_sending,
                 finished_recving=finished_recving,

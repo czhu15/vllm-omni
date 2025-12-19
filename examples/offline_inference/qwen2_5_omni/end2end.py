@@ -357,7 +357,7 @@ def main(args):
 
     sampling_params_list = [
         thinker_sampling_params,
-        # talker_sampling_params,
+        talker_sampling_params,
         # code2wav_sampling_params,
     ]
 
@@ -382,7 +382,7 @@ def main(args):
                 text_output = output.outputs[0].text
                 # Save aligned text file per request
                 prompt_text = prompts[request_id]["prompt"]
-                out_txt = os.path.join(output_dir, f"{request_id:05d}.txt")
+                out_txt = os.path.join(output_dir, f"{request_id:05d}_stage{stage_outputs.stage_id}.txt")
                 lines = []
                 lines.append("Prompt:\n")
                 lines.append(str(prompt_text) + "\n")
@@ -398,7 +398,7 @@ def main(args):
             for output in stage_outputs.request_output:
                 request_id = int(output.request_id)
                 audio_tensor = output.multimodal_output["audio"]
-                output_wav = os.path.join(output_dir, f"output_{output.request_id}.wav")
+                output_wav = os.path.join(output_dir, f"output_{output.request_id}_stage{stage_outputs.stage_id}.wav")
                 sf.write(output_wav, audio_tensor.detach().cpu().numpy(), samplerate=24000)
                 print(f"Request ID: {request_id}, Saved audio to {output_wav}")
 
