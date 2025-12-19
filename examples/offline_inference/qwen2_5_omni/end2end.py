@@ -6,6 +6,7 @@ with the correct prompt format on Qwen2.5-Omni
 """
 
 import os
+os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
 from typing import NamedTuple, Optional
 
 import librosa
@@ -288,7 +289,7 @@ query_map = {
 
 
 def main(args):
-    model_name = "Qwen/Qwen2.5-Omni-3B"
+    model_name = "/mnt/disk3/hf_models/Qwen2.5-Omni-3B"
 
     # Get paths from args
     video_path = getattr(args, "video_path", None)

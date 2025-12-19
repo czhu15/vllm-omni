@@ -13,7 +13,6 @@ the original input processing utilities for cross-stage data wiring.
 import asyncio
 import importlib
 import logging
-import multiprocessing as mp
 import os
 import sys
 from typing import Any, Optional, Union
@@ -39,6 +38,14 @@ from vllm_omni.inputs.data import OmniTokensPrompt
 
 logger = init_logger(__name__)
 
+import vllm.envs as envs
+if envs.VLLM_ENABLE_V1_MULTIPROCESSING:
+    import multiprocessing as mp
+    from multiprocessing import Queue
+    from multiprocessing import Process
+else:
+    from queue import Queue
+    from threading import Thread as Process
 
 class OmniStage:
     """Stage manager for orchestrating a single stage in the omni pipeline.
@@ -81,9 +88,9 @@ class OmniStage:
         default_sampling_params = getattr(stage_config, "default_sampling_params", {})
         self.default_sampling_params = SamplingParams(**_to_dict(default_sampling_params))
         # Runtime orchestration state (added)
-        self._in_q: Optional[mp.Queue] = None
-        self._out_q: Optional[mp.Queue] = None
-        self._proc: Optional[mp.Process] = None
+        self._in_q: Optional[Queue] = None
+        self._out_q: Optional[Queue] = None
+        self._proc: Optional[Process] = None
         self._log_file: Optional[str] = None
         self._shm_threshold_bytes: int = 65536
         self._logger = logging.getLogger(__name__)
@@ -145,7 +152,7 @@ class OmniStage:
         self.engine_outputs = engine_outputs
 
     # ----------------- New Orchestration APIs -----------------
-    def attach_queues(self, in_q: mp.Queue, out_q: mp.Queue) -> None:
+    def attach_queues(self, in_q: Queue, out_q: Queue) -> None:
         """Attach input and output queues for IPC communication.
 
         Args:
@@ -162,7 +169,7 @@ class OmniStage:
         is_async: bool = False,
         log_file: Optional[str] = None,
         shm_threshold_bytes: int = 65536,
-        ctx: Optional[mp.context.BaseContext] = None,
+        ctx: Optional[Any] = None,
         batch_timeout: int = 10,
         connectors_config: Optional[dict] = None,
         worker_backend: str = "multi_process",
@@ -197,7 +204,11 @@ class OmniStage:
         else:
             self._shm_threshold_bytes = shm_threshold_bytes
 
-        ctx = ctx or mp.get_context("spawn")
+        if envs.VLLM_ENABLE_V1_MULTIPROCESSING:
+            ctx = ctx or mp.get_context("spawn")
+        else:
+            ctx = None
+
         # Prepare lightweight dict config for worker
         engine_args = _to_dict(self.engine_args)
         runtime_cfg = _to_dict(getattr(self.stage_config, "runtime", {}))
@@ -234,7 +245,7 @@ class OmniStage:
                 )
         else:
             if is_async:
-                self._proc = ctx.Process(
+                self._proc = Process(
                     target=_stage_worker_async_entry,
                     args=(
                         self,
@@ -244,7 +255,7 @@ class OmniStage:
                     ),
                 )
             else:
-                self._proc = ctx.Process(
+                self._proc = Process(
                     target=_stage_worker,
                     args=(
                         model,
@@ -370,8 +381,8 @@ class OmniStage:
 def _stage_worker(
     model: str,
     stage_payload: dict[str, Any],
-    in_q: mp.Queue,
-    out_q: mp.Queue,
+    in_q: Queue,
+    out_q: Queue,
     log_file: Optional[str] = None,
     batch_timeout: int = 10,
 ) -> None:

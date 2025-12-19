@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-import multiprocessing as mp
 import os
 import time
 
@@ -213,7 +212,7 @@ class WorkerProc:
     def worker_main(
         rank: int,
         od_config: OmniDiffusionConfig,
-        pipe_writer: mp.connection.Connection,
+        pipe_writer,
         broadcast_handle,
     ) -> None:
         """Worker initialization and execution loops."""
