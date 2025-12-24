@@ -6,6 +6,7 @@ with the correct prompt format on Qwen2.5-Omni
 """
 
 import os
+os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
 from typing import NamedTuple, Optional
 
 import librosa

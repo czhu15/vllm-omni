@@ -1,5 +1,4 @@
 import asyncio
-import multiprocessing as mp
 import os
 import socket
 import time
@@ -63,6 +62,14 @@ from vllm_omni.outputs import OmniRequestOutput
 
 logger = init_logger(__name__)
 
+import vllm.envs as envs
+if envs.VLLM_ENABLE_V1_MULTIPROCESSING:
+    import multiprocessing as mp
+    from multiprocessing import Queue
+    from multiprocessing import Process
+else:
+    from queue import Queue
+    from threading import Thread as Process
 
 class AsyncOmni(EngineClient):
     """Async entry point for vLLM-Omni inference.
@@ -166,11 +173,15 @@ class AsyncOmni(EngineClient):
         if self.worker_backend == "ray":
             self._queue_cls = get_ray_queue_class()
         else:
-            self._ctx = mp.get_context("spawn")
-            self._queue_cls = lambda: self._ctx.Queue(maxsize=0)
+            if envs.VLLM_ENABLE_V1_MULTIPROCESSING:
+                self._ctx = mp.get_context("spawn")
+                self._queue_cls = lambda: self._ctx.Queue(maxsize=0)
+            else:
+                self._ctx = None
+                self._queue_cls = lambda: Queue(maxsize=0)
 
-        self._stage_in_queues: list[mp.Queue] = []
-        self._stage_out_queues: list[mp.Queue] = []
+        self._stage_in_queues: list[Queue] = []
+        self._stage_out_queues: list[Queue] = []
         self._init_sleep_seconds = max(0, int(init_sleep_seconds))
         self._shm_threshold_bytes = max(0, int(shm_threshold_bytes))
         self._start_stages(model)

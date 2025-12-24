@@ -1,7 +1,69 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-import multiprocessing as mp
+import vllm.envs as envs
+if envs.VLLM_ENABLE_V1_MULTIPROCESSING:
+    import multiprocessing as mp
+    from multiprocessing import Queue
+    from multiprocessing import Process
+else:
+    from queue import Queue
+    from threading import Thread as Process
+    from queue import Empty
+    
+    class ThreadPipeReader:
+        def __init__(self, q: Queue):
+            self._q = q
+            self._closed = False
+
+        def recv(self):
+            if self._closed:
+                raise OSError("Reader closed")
+            return self._q.get()  # blocks
+
+        def poll(self, timeout=0.0):
+            """Return True if a message is available within timeout seconds."""
+            if self._closed:
+                return False
+            if timeout and timeout > 0:
+                end = time.monotonic() + timeout
+                while time.monotonic() < end:
+                    try:
+                        item = self._q.get_nowait()
+                        # Put it back for the actual recv; we only check readiness
+                        self._q.put(item)
+                        return True
+                    except Empty:
+                        time.sleep(0.001)
+                return False
+            else:
+                try:
+                    item = self._q.get_nowait()
+                    self._q.put(item)
+                    return True
+                except Empty:
+                    return False
+
+        def close(self):
+            self._closed = True
+
+    class ThreadPipeWriter:
+        def __init__(self, q: Queue):
+            self._q = q
+            self._closed = False
+
+        def send(self, obj):
+            if self._closed:
+                raise OSError("Writer closed")
+            self._q.put(obj)
+
+        def close(self):
+            self._closed = True
+
+    def thread_pipe():
+        q = Queue()
+        return ThreadPipeReader(q), ThreadPipeWriter(q)
+
 import time
 
 from vllm.logger import init_logger
@@ -29,7 +91,7 @@ class DiffusionEngine:
         self.post_process_func = get_diffusion_post_process_func(od_config)
         self.pre_process_func = get_diffusion_pre_process_func(od_config)
 
-        self._processes: list[mp.Process] = []
+        self._processes: list[Process] = []
         self._closed = False
         self._make_client()
 
@@ -92,7 +154,8 @@ class DiffusionEngine:
         logger.info("Starting server...")
 
         num_gpus = od_config.num_gpus
-        mp.set_start_method("spawn", force=True)
+        if envs.VLLM_ENABLE_V1_MULTIPROCESSING:
+            mp.set_start_method("spawn", force=True)
         processes = []
 
         # Get the appropriate worker class for current device
@@ -103,9 +166,12 @@ class DiffusionEngine:
         scheduler_pipe_writers = []
 
         for i in range(num_gpus):
-            reader, writer = mp.Pipe(duplex=False)
+            if envs.VLLM_ENABLE_V1_MULTIPROCESSING:
+                reader, writer = mp.Pipe(duplex=False)
+            else:
+                reader, writer = thread_pipe()
             scheduler_pipe_writers.append(writer)
-            process = mp.Process(
+            process = Process(
                 target=worker_proc.worker_main,
                 args=(
                     i,  # rank
@@ -171,7 +237,8 @@ class DiffusionEngine:
             proc.join(timeout_s)
             if proc.is_alive():
                 logger.warning("Terminating diffusion worker %s after timeout", proc.name)
-                proc.terminate()
+                if envs.VLLM_ENABLE_V1_MULTIPROCESSING:
+                    proc.terminate()
                 proc.join(timeout_s)
 
         scheduler.close()
